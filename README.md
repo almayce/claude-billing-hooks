@@ -11,10 +11,12 @@ A global git hook that tracks Claude API token usage and calculates the billable
 **Formula:**
 
 ```
-commit_cost = (commit_tokens / session_tokens) × session_api_cost × markup × coef
+commit_cost = (commit_tokens / block_tokens) × block_api_cost × markup × coef
 ```
 
-Each commit is priced independently based on actual API cost — no fixed session size needed.
+Equivalent to `commit_tokens × price_per_token × markup × coef` — each commit is priced independently based on actual API cost.
+
+The snapshot stores the ccusage block's `startTime` alongside token count. If the block changes between commits, a new baseline is saved automatically and cost is not charged for that transition.
 
 After each `git commit`:
 
@@ -26,20 +28,20 @@ After each `git commit`:
   коммит : a3f2c1 — fix auth bug
   токены : 3200  (API: $0.03)
   наценка: 100 × 0.3
-  💰     : $0.90
+  💰     : $3.00
 ────────────────────────────────
 ```
 
-**First commit** in a repo saves the baseline and exits:
+**First commit** in a repo saves the baseline silently:
 
 ```
 📍 первый коммит: baseline токенов сохранён (45230)
 ```
 
-If ccusage resets between commits (new 5-hour block):
+**New ccusage block** detected between commits:
 
 ```
-♻ сессия ccusage сбросилась, считаем токены с начала сессии
+♻ новый блок ccusage, сохраняем baseline (112000)
 ```
 
 ## Requirements
@@ -60,21 +62,19 @@ Run once — works globally across all repositories.
 | Path | Description |
 |---|---|
 | `~/.git-hooks/` | Global hook scripts |
-| `~/.claude-tracker.json` | Saved markup value |
-| `~/.claude-commits.csv` | Full commit cost log (CSV) |
+| `~/.claude-commits.csv` | Full commit cost log |
 | `~/.cache/claude-tracker/` | Per-repo token snapshots |
 
-## Config
+## Defaults
 
-```json
-{ "markup": 100 }
-```
-
-Change anytime:
+Hardcoded in the script:
 
 ```bash
-nano ~/.claude-tracker.json
+DEFAULT_MARKUP=100   # markup over API cost
+DEFAULT_COEF=1       # attribution coefficient
 ```
+
+Change and reinstall to update defaults. Per-commit overrides via prompts.
 
 ## View log
 
