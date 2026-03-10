@@ -16,32 +16,34 @@ commit_cost = (commit_tokens / block_tokens) × block_api_cost × markup × coef
 
 Equivalent to `commit_tokens × price_per_token × markup × coef` — each commit is priced independently based on actual API cost.
 
-The snapshot stores the ccusage block's `startTime` alongside token count. If the block changes between commits, a new baseline is saved automatically and cost is not charged for that transition.
+A single global snapshot tracks the token count after each commit across all repositories. The delta for each commit equals tokens spent since the last commit — regardless of which project they were used in.
+
+The snapshot also stores the ccusage block's `startTime`. If the block changes between commits, a new baseline is saved automatically and cost is not charged for that transition.
 
 After each `git commit`:
 
 ```
-наценка [100]:
-коэф (0-1) [1]: 0.3
+markup [100]:
+coef (0-1) [1]: 0.3
 
 ────────────────────────────────
-  коммит : a3f2c1 — fix auth bug
-  токены : 3200  (API: $0.03)
-  наценка: 100 × 0.3
-  💰     : $3.00
+  commit : a3f2c1 — fix auth bug
+  tokens : 3200  (API: $0.03)
+  markup : 100 × 0.3
+  💰     : $0.90
 ────────────────────────────────
 ```
 
-**First commit** in a repo saves the baseline silently:
+**First commit** saves the baseline silently:
 
 ```
-📍 первый коммит: baseline токенов сохранён (45230)
+📍 first commit: token baseline saved (45230)
 ```
 
 **New ccusage block** detected between commits:
 
 ```
-♻ новый блок ccusage, сохраняем baseline (112000)
+♻ new ccusage block, saving baseline (112000)
 ```
 
 ## Requirements

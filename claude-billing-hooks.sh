@@ -1,34 +1,34 @@
 #!/bin/bash
 # ─────────────────────────────────────────
-# claude commit tracker — глобальная установка
+# claude commit tracker — global installation
 # ─────────────────────────────────────────
 #
-# КАК РАБОТАЕТ:
-#   устанавливается один раз глобально.
-#   срабатывает при каждом git commit в любом репозитории.
-#   считает токены, потраченные МЕЖДУ коммитами, и переводит в стоимость.
+# HOW IT WORKS:
+#   install once globally.
+#   fires on every git commit in any repository.
+#   counts tokens spent BETWEEN commits and converts to cost.
 #
-#   формула: (токены_коммита / токены_блока) × стоимость_API_блока × наценка × коэф
-#   каждый коммит считается независимо — цена пропорциональна реальной стоимости токенов.
+#   formula: (commit_tokens / block_tokens) × block_api_cost × markup × coef
+#   each commit is priced independently based on actual API cost.
 #
-# УСТАНОВКА:
+# INSTALLATION:
 #   bash claude-billing-hooks.sh
 #
-# ПОСЛЕ УСТАНОВКИ:
-#   просто делай git commit как обычно.
-#   в терминале появится:
+# AFTER INSTALLATION:
+#   just run git commit as usual.
+#   you will see in the terminal:
 #
-#     наценка [100]:
-#     коэф (0-1) [1]: 0.3
+#     markup [100]:
+#     coef (0-1) [1]: 0.3
 #
 #     ────────────────────────────────
-#       коммит : a3f2c1 — fix auth bug
-#       токены : 3200 (API: $0.03)
-#       наценка: 100 × 0.3
+#       commit : a3f2c1 — fix auth bug
+#       tokens : 3200 (API: $0.03)
+#       markup : 100 × 0.3
 #       💰     : $0.90
 #     ────────────────────────────────
 #
-# ЛОГ ВСЕХ КОММИТОВ (CSV):
+# FULL COMMIT LOG (CSV):
 #   cat ~/.claude-commits.csv
 #
 # ─────────────────────────────────────────
@@ -36,7 +36,7 @@
 
 for dep in node npx git; do
   if ! command -v "$dep" &>/dev/null; then
-    echo "ошибка: '$dep' не найден в PATH" >&2
+    echo "error: '$dep' not found in PATH" >&2
     exit 1
   fi
 done
@@ -60,7 +60,7 @@ EOF
 cat > "$GLOBAL_HOOKS_DIR/post-commit" << 'EOF'
 #!/bin/bash
 
-# вызываем локальный хук репозитория (если есть)
+# delegate to local repo hook if exists
 LOCAL_HOOK="$(git rev-parse --git-dir 2>/dev/null)/hooks/post-commit"
 if [ -x "$LOCAL_HOOK" ]; then
   "$LOCAL_HOOK" "$@"
@@ -77,7 +77,7 @@ REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
 PROJECT=$(basename "$REPO_PATH")
 SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-global"
 
-# получаем токены, стоимость и startTime активного блока
+# get tokens, cost and startTime of the active block
 read TOKENS_NOW COST_USD BLOCK_START <<< $(npx ccusage blocks --json 2>/dev/null | node -e '
   const d = JSON.parse(require("fs").readFileSync("/dev/stdin", "utf8"));
   const active = (d.data || d.blocks || []).find(b => b.isActive);
@@ -91,37 +91,37 @@ TOKENS_NOW=${TOKENS_NOW:-0}
 COST_USD=${COST_USD:-0}
 BLOCK_START=${BLOCK_START:-unknown}
 
-# если снапшота нет — первый коммит, сохраняем baseline
+# no snapshot yet — first commit, save baseline
 if [ ! -f "$SNAPSHOT_FILE" ]; then
   printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
   chmod 600 "$SNAPSHOT_FILE"
-  printf "📍 первый коммит: baseline токенов сохранён (%s)\n" "$TOKENS_NOW" > /dev/tty
+  printf "📍 first commit: token baseline saved (%s)\n" "$TOKENS_NOW" > /dev/tty
   exit 0
 fi
 
 read TOKENS_BEFORE BLOCK_START_BEFORE < "$SNAPSHOT_FILE"
 DELTA=$((TOKENS_NOW - TOKENS_BEFORE))
 
-# новый блок ccusage — сбрасываем baseline
+# new ccusage block — reset baseline
 if [ "$BLOCK_START" != "$BLOCK_START_BEFORE" ]; then
-  printf "♻ новый блок ccusage, сохраняем baseline (%s)\n" "$TOKENS_NOW" > /dev/tty
+  printf "♻ new ccusage block, saving baseline (%s)\n" "$TOKENS_NOW" > /dev/tty
   printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
   chmod 600 "$SNAPSHOT_FILE"
   exit 0
 fi
 
 if [ "$DELTA" -le 0 ]; then
-  printf "⚠ токены не изменились с последнего коммита\n" > /dev/tty
+  printf "⚠ no token changes since last commit\n" > /dev/tty
   printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
   exit 0
 fi
 
 printf "\n" > /dev/tty
-read -r -p "наценка [$DEFAULT_MARKUP]: " MARKUP < /dev/tty
+read -r -p "markup [$DEFAULT_MARKUP]: " MARKUP < /dev/tty
 MARKUP=${MARKUP:-$DEFAULT_MARKUP}
 if ! [[ "$MARKUP" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then MARKUP=$DEFAULT_MARKUP; fi
 
-read -r -p "коэф (0-1) [$DEFAULT_COEF]: " COEF < /dev/tty
+read -r -p "coef (0-1) [$DEFAULT_COEF]: " COEF < /dev/tty
 COEF=${COEF:-$DEFAULT_COEF}
 if ! [[ "$COEF" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]]; then COEF=$DEFAULT_COEF; fi
 
@@ -143,9 +143,9 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M')
 {
   printf "\n"
   printf "────────────────────────────────\n"
-  printf "  коммит : %s — %s\n" "$COMMIT_HASH" "$COMMIT_MSG"
-  printf "  токены : %s  (API: \$%s)\n" "$DELTA" "$COST_API"
-  printf "  наценка: %s × %s\n" "$MARKUP" "$COEF"
+  printf "  commit : %s — %s\n" "$COMMIT_HASH" "$COMMIT_MSG"
+  printf "  tokens : %s  (API: \$%s)\n" "$DELTA" "$COST_API"
+  printf "  markup : %s × %s\n" "$MARKUP" "$COEF"
   printf "  💰     : \$%s\n" "$COST"
   printf "────────────────────────────────\n"
 } > /dev/tty
@@ -166,5 +166,5 @@ chmod +x "$GLOBAL_HOOKS_DIR/pre-commit"
 chmod +x "$GLOBAL_HOOKS_DIR/post-commit"
 
 echo ""
-echo "✓ установлено — работает во всех репозиториях"
-echo "✓ лог: $HOME/.claude-commits.csv"
+echo "✓ installed — works across all repositories"
+echo "✓ log: $HOME/.claude-commits.csv"
