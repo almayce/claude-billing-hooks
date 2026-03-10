@@ -109,10 +109,15 @@ TOKENS_BEFORE=$(cat "$SNAPSHOT_FILE")
 DELTA=$((TOKENS_NOW - TOKENS_BEFORE))
 
 if [ "$DELTA" -le 0 ]; then
-  printf "⚠ токены не изменились с последнего коммита (delta=%s)\n" "$DELTA" > /dev/tty
-  # обновляем снапшот на случай сброса сессии
-  echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
-  exit 0
+  if [ "$TOKENS_NOW" -gt 0 ] && [ "$TOKENS_NOW" -lt "$TOKENS_BEFORE" ]; then
+    # сессия сбросилась (рестарт / новый блок) — считаем токены с начала новой сессии
+    printf "♻ сессия ccusage сбросилась, считаем токены с начала сессии\n" > /dev/tty
+    DELTA=$TOKENS_NOW
+  else
+    printf "⚠ токены не изменились с последнего коммита\n" > /dev/tty
+    echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+    exit 0
+  fi
 fi
 
 SESSION_TOKENS=$TOKENS_NOW
