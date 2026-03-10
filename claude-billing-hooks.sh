@@ -6,7 +6,7 @@
 # КАК РАБОТАЕТ:
 #   устанавливается один раз глобально.
 #   срабатывает при каждом git commit в любом репозитории.
-#   после коммита спрашивает ставку и коэф — считает стоимость.
+#   считает токены, потраченные МЕЖДУ коммитами, и переводит в стоимость.
 #
 # УСТАНОВКА:
 #   bash claude-billing-hooks.sh
@@ -14,8 +14,6 @@
 # ПОСЛЕ УСТАНОВКИ:
 #   просто делай git commit как обычно.
 #   в терминале появится:
-#
-#     📍 токены до коммита: 45230
 #
 #     ставка за сессию [150]:
 #     коэф (0-1) [1]: 0.3
@@ -60,43 +58,20 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # ── pre-commit ────────────────────────────
+# только вызываем локальный хук репозитория (если есть)
 cat > "$GLOBAL_HOOKS_DIR/pre-commit" << 'EOF'
 #!/bin/bash
-
-# сначала вызываем локальный хук репозитория (если есть)
 LOCAL_HOOK="$(git rev-parse --git-dir 2>/dev/null)/hooks/pre-commit"
 if [ -x "$LOCAL_HOOK" ]; then
   "$LOCAL_HOOK" "$@" || exit $?
 fi
-
-SNAPSHOT_DIR="$HOME/.cache/claude-tracker"
-mkdir -p "$SNAPSHOT_DIR"
-
-REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
-if command -v md5sum &>/dev/null; then
-  REPO_HASH=$(printf "%s" "$REPO_PATH" | md5sum | cut -c1-8)
-else
-  REPO_HASH=$(printf "%s" "$REPO_PATH" | md5 | cut -c1-8)
-fi
-SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-$REPO_HASH"
-
-TOKENS=$(npx ccusage blocks --json 2>/dev/null | node -e '
-  const d = JSON.parse(require("fs").readFileSync("/dev/stdin", "utf8"));
-  const active = (d.data || d.blocks || []).find(b => b.isActive);
-  process.stdout.write(String(active ? active.totalTokens : 0));
-' 2>/dev/null)
-TOKENS=${TOKENS:-0}
-
-echo "$TOKENS" > "$SNAPSHOT_FILE"
-chmod 600 "$SNAPSHOT_FILE"
-printf "📍 токены до коммита: %s\n" "$TOKENS" > /dev/tty
 EOF
 
 # ── post-commit ───────────────────────────
 cat > "$GLOBAL_HOOKS_DIR/post-commit" << 'EOF'
 #!/bin/bash
 
-# сначала вызываем локальный хук репозитория (если есть)
+# вызываем локальный хук репозитория (если есть)
 LOCAL_HOOK="$(git rev-parse --git-dir 2>/dev/null)/hooks/post-commit"
 if [ -x "$LOCAL_HOOK" ]; then
   "$LOCAL_HOOK" "$@"
@@ -114,29 +89,35 @@ else
 fi
 SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-$REPO_HASH"
 
-[ ! -f "$SNAPSHOT_FILE" ] && exit 0
-TOKENS_BEFORE=$(cat "$SNAPSHOT_FILE")
-
-# один вызов ccusage — результат используется и для DELTA, и для SESSION_TOKENS
-TOKENS_AFTER=$(npx ccusage blocks --json 2>/dev/null | node -e '
+# получаем текущие токены
+TOKENS_NOW=$(npx ccusage blocks --json 2>/dev/null | node -e '
   const d = JSON.parse(require("fs").readFileSync("/dev/stdin", "utf8"));
   const active = (d.data || d.blocks || []).find(b => b.isActive);
   process.stdout.write(String(active ? active.totalTokens : 0));
 ' 2>/dev/null)
-TOKENS_AFTER=${TOKENS_AFTER:-0}
+TOKENS_NOW=${TOKENS_NOW:-0}
 
-DELTA=$((TOKENS_AFTER - TOKENS_BEFORE))
-if [ "$DELTA" -le 0 ]; then
-  printf "⚠ не удалось посчитать дельту токенов\n" > /dev/tty
-  rm -f "$SNAPSHOT_FILE"
+# если снапшота нет — первый коммит, просто сохраняем baseline
+if [ ! -f "$SNAPSHOT_FILE" ]; then
+  echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+  chmod 600 "$SNAPSHOT_FILE"
+  printf "📍 первый коммит: baseline токенов сохранён (%s)\n" "$TOKENS_NOW" > /dev/tty
   exit 0
 fi
 
-# SESSION_TOKENS == TOKENS_AFTER (те же данные, повторный вызов не нужен)
-SESSION_TOKENS=$TOKENS_AFTER
+TOKENS_BEFORE=$(cat "$SNAPSHOT_FILE")
+DELTA=$((TOKENS_NOW - TOKENS_BEFORE))
+
+if [ "$DELTA" -le 0 ]; then
+  printf "⚠ токены не изменились с последнего коммита (delta=%s)\n" "$DELTA" > /dev/tty
+  # обновляем снапшот на случай сброса сессии
+  echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+  exit 0
+fi
+
+SESSION_TOKENS=$TOKENS_NOW
 [ "$SESSION_TOKENS" -eq 0 ] && SESSION_TOKENS=1
 
-# читаем конфиг через fs, не через require (избегаем кеша)
 DEFAULT_RATE=$(node -e "
   try {
     const c = JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8'));
@@ -187,7 +168,9 @@ printf "%s | %s | %s | tokens:%s | session:%s | rate:%s | coef:%s | cost:$%s\n" 
   "$TIMESTAMP" "$COMMIT_HASH" "$COMMIT_MSG" \
   "$DELTA" "$SESSION_TOKENS" "$RATE" "$COEF" "$COST" >> "$LOG_FILE"
 
-rm -f "$SNAPSHOT_FILE"
+# сохраняем снапшот для следующего коммита
+echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+chmod 600 "$SNAPSHOT_FILE"
 EOF
 
 chmod +x "$GLOBAL_HOOKS_DIR/pre-commit"
