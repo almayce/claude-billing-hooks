@@ -1,14 +1,34 @@
 # claude-billing-hooks
 
-A global git hook that tracks Claude API token usage and calculates the cost of each commit.
+A global git hook that tracks Claude API token usage and calculates the billable cost of each commit.
 
 ## How it works
 
 - Installs global `pre-commit` and `post-commit` hooks via `git config --global core.hooksPath`
-- **pre-commit**: delegates to the local repo's `pre-commit` hook if one exists (no token logic)
-- **post-commit**: reads the previous token snapshot, calculates the delta, prompts for session rate and coefficient, displays and logs the estimated cost, then saves a new snapshot for the next commit
+- **pre-commit**: delegates to the local repo's hook if one exists
+- **post-commit**: gets token usage and real API cost from `ccusage`, calculates commit cost, logs to CSV
 
-The snapshot is stored per-repo (`~/.cache/claude-tracker/.tokens-<repo-hash>`), so tracking works independently across multiple repositories.
+**Formula:**
+
+```
+commit_cost = (commit_tokens / session_tokens) × session_api_cost × markup × coef
+```
+
+Each commit is priced independently based on actual API cost — no fixed session size needed.
+
+After each `git commit`:
+
+```
+наценка [100]:
+коэф (0-1) [1]: 0.3
+
+────────────────────────────────
+  коммит : a3f2c1 — fix auth bug
+  токены : 3200  (API: $0.03)
+  наценка: 100 × 0.3
+  💰     : $0.90
+────────────────────────────────
+```
 
 **First commit** in a repo saves the baseline and exits:
 
@@ -16,21 +36,7 @@ The snapshot is stored per-repo (`~/.cache/claude-tracker/.tokens-<repo-hash>`),
 📍 первый коммит: baseline токенов сохранён (45230)
 ```
 
-**Subsequent commits** prompt and show the cost:
-
-```
-ставка за сессию [150]:
-коэф (0-1) [1]: 0.3
-
-────────────────────────────────
-  коммит : a3f2c1 — fix auth bug
-  токены : 3200 / 48430 в сессии
-  ставка : $150 × 0.3
-  💰     : $2.97
-────────────────────────────────
-```
-
-If ccusage resets between commits (new block / restart), the hook detects it and counts tokens from the start of the new session:
+If ccusage resets between commits (new 5-hour block):
 
 ```
 ♻ сессия ccusage сбросилась, считаем токены с начала сессии
@@ -54,11 +60,17 @@ Run once — works globally across all repositories.
 | Path | Description |
 |---|---|
 | `~/.git-hooks/` | Global hook scripts |
-| `~/.claude-tracker.json` | Saved default rate |
-| `~/.claude-commits.log` | Full commit cost log |
+| `~/.claude-tracker.json` | Saved markup value |
+| `~/.claude-commits.csv` | Full commit cost log (CSV) |
 | `~/.cache/claude-tracker/` | Per-repo token snapshots |
 
-## Change default rate
+## Config
+
+```json
+{ "markup": 100 }
+```
+
+Change anytime:
 
 ```bash
 nano ~/.claude-tracker.json
@@ -67,5 +79,7 @@ nano ~/.claude-tracker.json
 ## View log
 
 ```bash
-cat ~/.claude-commits.log
+cat ~/.claude-commits.csv
 ```
+
+CSV columns: `timestamp, project, commit, message, tokens, api_cost_usd, markup, coef, cost_usd`
