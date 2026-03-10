@@ -75,12 +75,7 @@ mkdir -p "$SNAPSHOT_DIR"
 
 REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
 PROJECT=$(basename "$REPO_PATH")
-if command -v md5sum &>/dev/null; then
-  REPO_HASH=$(printf "%s" "$REPO_PATH" | md5sum | cut -c1-8)
-else
-  REPO_HASH=$(printf "%s" "$REPO_PATH" | md5 | cut -c1-8)
-fi
-SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-$REPO_HASH"
+SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-global"
 
 # получаем токены, стоимость и startTime активного блока
 read TOKENS_NOW COST_USD BLOCK_START <<< $(npx ccusage blocks --json 2>/dev/null | node -e '

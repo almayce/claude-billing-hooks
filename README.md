@@ -63,7 +63,7 @@ Run once — works globally across all repositories.
 |---|---|
 | `~/.git-hooks/` | Global hook scripts |
 | `~/.claude-commits.csv` | Full commit cost log |
-| `~/.cache/claude-tracker/` | Per-repo token snapshots |
+| `~/.cache/claude-tracker/` | Global token snapshot |
 
 ## Defaults
 
