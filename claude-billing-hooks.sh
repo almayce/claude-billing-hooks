@@ -81,39 +81,43 @@ else
 fi
 SNAPSHOT_FILE="$SNAPSHOT_DIR/.tokens-$REPO_HASH"
 
-# получаем токены и стоимость активного блока
-read TOKENS_NOW COST_USD <<< $(npx ccusage blocks --json 2>/dev/null | node -e '
+# получаем токены, стоимость и startTime активного блока
+read TOKENS_NOW COST_USD BLOCK_START <<< $(npx ccusage blocks --json 2>/dev/null | node -e '
   const d = JSON.parse(require("fs").readFileSync("/dev/stdin", "utf8"));
   const active = (d.data || d.blocks || []).find(b => b.isActive);
   if (active) {
-    process.stdout.write(active.totalTokens + " " + active.costUSD);
+    process.stdout.write(active.totalTokens + " " + active.costUSD + " " + active.startTime);
   } else {
-    process.stdout.write("0 0");
+    process.stdout.write("0 0 unknown");
   }
 ' 2>/dev/null)
 TOKENS_NOW=${TOKENS_NOW:-0}
 COST_USD=${COST_USD:-0}
+BLOCK_START=${BLOCK_START:-unknown}
 
 # если снапшота нет — первый коммит, сохраняем baseline
 if [ ! -f "$SNAPSHOT_FILE" ]; then
-  echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+  printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
   chmod 600 "$SNAPSHOT_FILE"
   printf "📍 первый коммит: baseline токенов сохранён (%s)\n" "$TOKENS_NOW" > /dev/tty
   exit 0
 fi
 
-TOKENS_BEFORE=$(cat "$SNAPSHOT_FILE")
+read TOKENS_BEFORE BLOCK_START_BEFORE < "$SNAPSHOT_FILE"
 DELTA=$((TOKENS_NOW - TOKENS_BEFORE))
 
+# новый блок ccusage — сбрасываем baseline
+if [ "$BLOCK_START" != "$BLOCK_START_BEFORE" ]; then
+  printf "♻ новый блок ccusage, сохраняем baseline (%s)\n" "$TOKENS_NOW" > /dev/tty
+  printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
+  chmod 600 "$SNAPSHOT_FILE"
+  exit 0
+fi
+
 if [ "$DELTA" -le 0 ]; then
-  if [ "$TOKENS_NOW" -gt 0 ] && [ "$TOKENS_NOW" -lt "$TOKENS_BEFORE" ]; then
-    printf "♻ сессия ccusage сбросилась, считаем токены с начала сессии\n" > /dev/tty
-    DELTA=$TOKENS_NOW
-  else
-    printf "⚠ токены не изменились с последнего коммита\n" > /dev/tty
-    echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
-    exit 0
-  fi
+  printf "⚠ токены не изменились с последнего коммита\n" > /dev/tty
+  printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
+  exit 0
 fi
 
 printf "\n" > /dev/tty
@@ -158,7 +162,7 @@ printf '"%s","%s","%s","%s",%s,%s,%s,%s,%s\n' \
   "$TIMESTAMP" "$PROJECT" "$COMMIT_HASH" "$COMMIT_MSG_CSV" \
   "$DELTA" "$COST_API" "$MARKUP" "$COEF" "$COST" >> "$LOG_FILE"
 
-echo "$TOKENS_NOW" > "$SNAPSHOT_FILE"
+printf "%s %s" "$TOKENS_NOW" "$BLOCK_START" > "$SNAPSHOT_FILE"
 chmod 600 "$SNAPSHOT_FILE"
 EOF
 
